@@ -1,0 +1,12 @@
+# JetBrains / PyCharm / IDEA
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
