@@ -34,8 +34,8 @@ SEARCH_QUERY = 'agent'
 # 101270100 - 成都
 CITY_CODE = '101020100'
 
-# 抓取页数
-MAX_PAGES = 10
+# 滚动次数（每次滚动会加载约15条数据）
+MAX_SCROLLS = 20
 
 # 输出文件名
 OUTPUT_FILE = 'data.csv'
@@ -49,7 +49,7 @@ def main():
     print("=" * 70)
     print(f"\n搜索关键词: {SEARCH_QUERY}")
     print(f"城市代码: {CITY_CODE}")
-    print(f"抓取页数: {MAX_PAGES}")
+    print(f"滚动次数: {MAX_SCROLLS}")
     print(f"输出文件: {OUTPUT_FILE}\n")
 
     # 创建文件对象
@@ -67,9 +67,6 @@ def main():
     dp = ChromiumPage()
     print("✓ 浏览器启动成功！")
 
-    # 监听列表API
-    dp.listen.start('zpgeek/search/joblist.json')
-
     # 访问搜索页面
     search_url = f'https://www.zhipin.com/web/geek/job?query={SEARCH_QUERY}&city={CITY_CODE}'
     print(f"\n正在访问: {search_url}")
@@ -78,25 +75,36 @@ def main():
     print("\n等待页面加载，请手动完成：")
     print("  1. 人机验证（如果有）")
     print("  2. 登录账号（如果需要）")
-    print(f"\n⏳ 等待 10 秒后自动开始抓取...")
-    time.sleep(10)
+    print(f"\n⏳ 等待 20 秒后自动开始抓取...")
+    time.sleep(20)
 
     total_jobs = 0
+    processed_job_ids = set()  # 用于去重
 
-    # 循环翻页
-    for page in range(1, MAX_PAGES + 1):
+    # 循环滚动加载
+    for scroll_count in range(1, MAX_SCROLLS + 1):
         print(f'\n{"="*70}')
-        print(f'正在采集第 {page} 页的数据内容')
+        print(f'第 {scroll_count} 次滚动加载')
         print("=" * 70)
 
         try:
+            # 重新启动API监听
+            dp.listen.start('zpgeek/search/joblist.json')
+
+            # 多次小幅度滚动，模拟真实用户行为
+            print("  正在滚动页面...")
+            for i in range(3):
+                dp.scroll.down(500)  # 每次向下滚动500像素
+                time.sleep(0.5)
+
+            # 最后滚动到底部
             dp.scroll.to_bottom()
-            time.sleep(1)
+            time.sleep(3)  # 增加等待时间，确保数据加载
 
             # 等待列表API响应
             r = dp.listen.wait(timeout=10)
             if not r:
-                print("  ⚠ 未捕获到 API 响应，跳过此页")
+                print("  ⚠ 未捕获到 API 响应，继续滚动")
                 continue
 
             json_data = r.response.body
@@ -105,12 +113,22 @@ def main():
                 continue
 
             jobList = json_data['zpData']['jobList']
-            print(f"  ✓ 成功获取 {len(jobList)} 个岗位")
+            new_jobs = 0
+
+            print(f"  ✓ 获取到 {len(jobList)} 个岗位数据")
 
             # 遍历职位列表
             for idx, job in enumerate(jobList, 1):
                 try:
                     job_id = job.get('encryptJobId', '')
+
+                    # 去重检查
+                    if job_id in processed_job_ids:
+                        continue
+
+                    processed_job_ids.add(job_id)
+                    new_jobs += 1
+
                     security_id = job.get('securityId', '')
                     lid = json_data.get('zpData', {}).get('lid', '')
                     post_desc = ''
@@ -159,26 +177,28 @@ def main():
                     csv_writer.writerow(dit)
                     f.flush()
 
-                    print(f"    [{idx}] {dit['职位']} | {dit['公司']} | {dit['薪资']}")
+                    print(f"    [新增] {dit['职位']} | {dit['公司']} | {dit['薪资']}")
                     total_jobs += 1
 
                 except Exception as e:
                     print(f"    ✗ 处理岗位数据出错: {e}")
                     continue
 
-            # 点击下一页
-            if page < MAX_PAGES:
-                print(f"\n  点击下一页...")
-                next_button = dp.ele('css:.ui-icon-arrow-right')
-                if next_button:
-                    next_button.click()
-                    time.sleep(2)
-                else:
-                    print("  ⚠ 未找到下一页按钮，停止抓取")
+            print(f"  本次新增 {new_jobs} 个岗位，累计 {total_jobs} 个")
+
+            # 如果连续3次没有新数据，说明已经到底
+            if new_jobs == 0:
+                if scroll_count >= 3:  # 至少滚动3次
+                    print("\n  ℹ 没有更多新数据，停止采集")
                     break
+                else:
+                    print("  继续尝试加载...")
+
+            # 滚动间隔，避免请求过快
+            time.sleep(1)
 
         except Exception as e:
-            print(f"  ✗ 抓取第 {page} 页出错: {e}")
+            print(f"  ✗ 第 {scroll_count} 次滚动出错: {e}")
             continue
 
     f.close()
@@ -188,7 +208,7 @@ def main():
     print(f"数据采集完成！")
     print("=" * 70)
     print(f"\n统计信息：")
-    print(f"  - 抓取页数: {page}")
+    print(f"  - 滚动次数: {scroll_count}")
     print(f"  - 总岗位数: {total_jobs}")
     print(f"  - 输出文件: {OUTPUT_FILE}")
     print("\n" + "=" * 70)
