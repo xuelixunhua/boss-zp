@@ -10,6 +10,10 @@ import re
 from collections import Counter
 import json
 import os
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
 
 # ==================== 配置参数 ====================
 
@@ -18,9 +22,10 @@ INPUT_FILE = 'data.csv'
 
 # 输出文件
 OUTPUT_FILE = 'tech_stack_analysis.json'
+MARKDOWN_FILE = 'tech_stack_analysis.md'  # Markdown报告文件
 
 # 大模型配置
-USE_LLM = False  # 是否使用大模型分析（需要 API Key）
+USE_LLM = True  # 是否使用大模型分析（需要 API Key）
 LLM_PROVIDER = 'qwen'  # 可选: 'qwen'(通义千问), 'openai', 'deepseek'
 
 # API Key 配置（从环境变量读取，更安全）
@@ -349,6 +354,97 @@ def save_report(report, output_file):
     print(f"\n✓ 分析报告已保存到: {output_file}")
 
 
+def save_markdown_report(report, output_file):
+    """保存 Markdown 格式的报告"""
+    with open(output_file, 'w', encoding='utf-8') as f:
+        # 标题
+        f.write("# 职位技术栈分析报告\n\n")
+        f.write(f"> 分析职位数: {report['总职位数']}\n\n")
+
+        # 高频技术统计
+        f.write("## 🔥 高频技术 Top 20\n\n")
+        f.write("| 排名 | 技术 | 类别 | 出现次数 | 占比 |\n")
+        f.write("|------|------|------|----------|------|\n")
+        for idx, tech in enumerate(report['高频技术'][:20], 1):
+            f.write(f"| {idx} | **{tech['技术']}** | {tech['类别']} | {tech['出现次数']} | {tech['占比']} |\n")
+
+        # 各技术类别详细统计
+        f.write("\n## 📊 各技术类别统计\n\n")
+        for category, data in report['技术栈统计'].items():
+            f.write(f"### {category}\n\n")
+            f.write(f"- **总计**: {data['总计']} 个技术\n")
+            f.write(f"- **最常用**: {data['最常用']}\n\n")
+
+            # 排序并显示前10个
+            sorted_techs = sorted(data['技术列表'].items(),
+                                 key=lambda x: x[1]['出现次数'],
+                                 reverse=True)[:10]
+            f.write("| 技术 | 出现次数 | 占比 |\n")
+            f.write("|------|----------|------|\n")
+            for tech, info in sorted_techs:
+                f.write(f"| {tech} | {info['出现次数']} | {info['占比']} |\n")
+            f.write("\n")
+
+        # 学习建议
+        f.write("## 💡 学习建议\n\n")
+        for rec in report['学习建议']:
+            f.write(f"### {rec['类别']} {rec['重要性']}\n\n")
+            f.write(f"**核心技术**: {', '.join(rec['核心技术'])}\n\n")
+            f.write(f"**建议**: {rec['建议']}\n\n")
+
+        # 大模型深度分析
+        if '大模型分析' in report and report['大模型分析']:
+            f.write("## 🤖 大模型深度分析\n\n")
+
+            llm_result = report['大模型分析'].get('分析结果', '')
+
+            # 尝试解析JSON格式的分析结果
+            import re
+            json_match = re.search(r'```json\n(.*?)\n```', llm_result, re.DOTALL)
+            if json_match:
+                try:
+                    analysis = json.loads(json_match.group(1))
+
+                    # 核心技术栈
+                    f.write("### 核心技术栈\n\n")
+                    for tech in analysis['核心技术栈']:
+                        f.write(f"- **{tech}**\n")
+                    f.write("\n")
+
+                    # 技能等级要求
+                    f.write("### 技能等级要求\n\n")
+                    for level, skills in analysis['技能等级'].items():
+                        f.write(f"#### {level}\n\n")
+                        for skill in skills:
+                            f.write(f"- {skill}\n")
+                        f.write("\n")
+
+                    # 学习路线
+                    f.write("### 学习路线\n\n")
+                    for i, step in enumerate(analysis['学习路线'], 1):
+                        f.write(f"{i}. {step}\n")
+                    f.write("\n")
+
+                    # 差异化技术
+                    f.write("### 差异化技术（竞争优势）\n\n")
+                    for tech in analysis['差异化技术']:
+                        f.write(f"- {tech}\n")
+                    f.write("\n")
+
+                except json.JSONDecodeError:
+                    # 如果解析失败，直接输出原始文本
+                    f.write(llm_result + "\n\n")
+            else:
+                # 没有JSON格式，直接输出
+                f.write(llm_result + "\n\n")
+
+        # 页脚
+        f.write("---\n\n")
+        f.write("*本报告由职位技术栈分析工具自动生成*\n")
+
+    print(f"✓ Markdown报告已保存到: {output_file}")
+
+
 def print_summary(report):
     """打印摘要信息"""
     print("\n" + "="*70)
@@ -403,6 +499,9 @@ def main():
 
     # 6. 保存报告
     save_report(report, OUTPUT_FILE)
+
+    # 6.5 保存 Markdown 报告
+    save_markdown_report(report, MARKDOWN_FILE)
 
     # 7. 打印摘要
     print_summary(report)

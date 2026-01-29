@@ -80,12 +80,15 @@ def main():
 
     total_jobs = 0
     processed_job_ids = set()  # 用于去重
+    all_jobs_data = []  # 存储所有职位的基本信息
 
-    # 循环滚动加载
+    print("\n" + "=" * 70)
+    print("阶段 1: 快速收集职位列表")
+    print("=" * 70)
+
+    # 第一阶段：快速滚动收集所有职位基本信息
     for scroll_count in range(1, MAX_SCROLLS + 1):
-        print(f'\n{"="*70}')
-        print(f'第 {scroll_count} 次滚动加载')
-        print("=" * 70)
+        print(f'\n第 {scroll_count} 次滚动加载')
 
         try:
             # 重新启动API监听
@@ -117,7 +120,7 @@ def main():
 
             print(f"  ✓ 获取到 {len(jobList)} 个岗位数据")
 
-            # 遍历职位列表
+            # 遍历职位列表，只收集基本信息
             for idx, job in enumerate(jobList, 1):
                 try:
                     job_id = job.get('encryptJobId', '')
@@ -129,55 +132,16 @@ def main():
                     processed_job_ids.add(job_id)
                     new_jobs += 1
 
-                    security_id = job.get('securityId', '')
-                    lid = json_data.get('zpData', {}).get('lid', '')
-                    post_desc = ''
-
-                    # 获取职位描述
-                    if job_id and security_id:
-                        try:
-                            detail_url = f'https://www.zhipin.com/job_detail/{job_id}.html?securityId={security_id}&lid={lid}'
-                            dp.get(detail_url)
-                            time.sleep(2)
-
-                            # 从页面提取职位描述
-                            desc_element = dp.ele('css:.job-detail-section')
-                            if not desc_element:
-                                desc_element = dp.ele('css:.job-sec-text')
-
-                            if desc_element:
-                                post_desc = desc_element.text
-
-                            dp.back()
-                            time.sleep(0.5)
-
-                        except Exception as e:
-                            if 'job_detail' in dp.url:
-                                dp.back()
-                                time.sleep(0.5)
-
-                    # 提取职位信息
-                    dit = {
-                        '职位': job.get('jobName', ''),
-                        '城市': job.get('cityName', ''),
-                        '区域': job.get('areaDistrict', ''),
-                        '商圈': job.get('businessDistrict', ''),
-                        '公司': job.get('brandName', ''),
-                        '薪资': job.get('salaryDesc', ''),
-                        '经验': job.get('jobExperience', ''),
-                        '学历': job.get('jobDegree', ''),
-                        '领域': job.get('brandIndustry', ''),
-                        '性质': job.get('brandStageName', ''),
-                        '规模': job.get('brandScaleName', ''),
-                        '技能标签': ' '.join(job.get('skills', [])),
-                        '福利标签': ' '.join(job.get('welfareList', [])),
-                        '职位描述': post_desc,
+                    # 保存职位基本信息和详情页参数
+                    job_data = {
+                        'job': job,
+                        'security_id': job.get('securityId', ''),
+                        'lid': json_data.get('zpData', {}).get('lid', ''),
+                        'job_id': job_id
                     }
+                    all_jobs_data.append(job_data)
 
-                    csv_writer.writerow(dit)
-                    f.flush()
-
-                    print(f"    [新增] {dit['职位']} | {dit['公司']} | {dit['薪资']}")
+                    print(f"    [收集] {job.get('jobName', '')} | {job.get('brandName', '')} | {job.get('salaryDesc', '')}")
                     total_jobs += 1
 
                 except Exception as e:
@@ -189,7 +153,7 @@ def main():
             # 如果连续3次没有新数据，说明已经到底
             if new_jobs == 0:
                 if scroll_count >= 3:  # 至少滚动3次
-                    print("\n  ℹ 没有更多新数据，停止采集")
+                    print("\n  ℹ 没有更多新数据，停止滚动")
                     break
                 else:
                     print("  继续尝试加载...")
@@ -201,6 +165,64 @@ def main():
             print(f"  ✗ 第 {scroll_count} 次滚动出错: {e}")
             continue
 
+    # 第二阶段：批量获取职位详情
+    print("\n" + "=" * 70)
+    print(f"阶段 2: 获取职位详情 (共 {len(all_jobs_data)} 个)")
+    print("=" * 70)
+
+    for idx, job_data in enumerate(all_jobs_data, 1):
+        try:
+            job = job_data['job']
+            job_id = job_data['job_id']
+            security_id = job_data['security_id']
+            lid = job_data['lid']
+            post_desc = ''
+
+            # 获取职位描述
+            if job_id and security_id:
+                try:
+                    detail_url = f'https://www.zhipin.com/job_detail/{job_id}.html?securityId={security_id}&lid={lid}'
+                    dp.get(detail_url)
+                    time.sleep(2)
+
+                    # 从页面提取职位描述
+                    desc_element = dp.ele('css:.job-detail-section')
+                    if not desc_element:
+                        desc_element = dp.ele('css:.job-sec-text')
+
+                    if desc_element:
+                        post_desc = desc_element.text
+
+                except Exception as e:
+                    print(f"  ⚠ 获取详情失败: {e}")
+
+            # 提取职位信息
+            dit = {
+                '职位': job.get('jobName', ''),
+                '城市': job.get('cityName', ''),
+                '区域': job.get('areaDistrict', ''),
+                '商圈': job.get('businessDistrict', ''),
+                '公司': job.get('brandName', ''),
+                '薪资': job.get('salaryDesc', ''),
+                '经验': job.get('jobExperience', ''),
+                '学历': job.get('jobDegree', ''),
+                '领域': job.get('brandIndustry', ''),
+                '性质': job.get('brandStageName', ''),
+                '规模': job.get('brandScaleName', ''),
+                '技能标签': ' '.join(job.get('skills', [])),
+                '福利标签': ' '.join(job.get('welfareList', [])),
+                '职位描述': post_desc,
+            }
+
+            csv_writer.writerow(dit)
+            f.flush()
+
+            print(f"  [{idx}/{len(all_jobs_data)}] {dit['职位']} | {dit['公司']} | {'✓ 有描述' if post_desc else '✗ 无描述'}")
+
+        except Exception as e:
+            print(f"  ✗ 处理岗位 {idx} 出错: {e}")
+            continue
+
     f.close()
 
     # 显示统计
@@ -208,7 +230,6 @@ def main():
     print(f"数据采集完成！")
     print("=" * 70)
     print(f"\n统计信息：")
-    print(f"  - 滚动次数: {scroll_count}")
     print(f"  - 总岗位数: {total_jobs}")
     print(f"  - 输出文件: {OUTPUT_FILE}")
     print("\n" + "=" * 70)
